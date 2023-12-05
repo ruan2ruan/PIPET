@@ -7,7 +7,7 @@ Phenotypic information based on bulk data predicts relevant subpopulations in si
 `PIPET` can be used to predict relevant subpopulations in single-cell data from phenotypic information in bulk data. You can use known feature vectors of phenotypic information to preform PIPET() or create feature vectors via the function in the `PIPET`. This package also provides commonly used downstream analysis for creating customizable visualization results. The workflow of `PIPET` is shown in the following Figure:
 
 <p align="center">
-<img src=Figure_PIPET.jpg height="900" width="610">
+<img src=Figure_PIPET.jpg height="900" width="640">
 </p>
 
 ## Installation
