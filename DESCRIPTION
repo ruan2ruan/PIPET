@@ -1,0 +1,34 @@
+Package: PIPET
+Title: Phenotypic Information Based on Bulk Data Predicts Relevant Subpopulations in Single Cell Data
+Version: 0.1.0
+Authors@R: 
+    person(given = "Xinjia", 
+           family = "Ruan", 
+           role = c("aut", "cre"),
+           email = "ruan.cpu@foxmail.com")
+Description: PIPET can be used to predict relevant subpopulations in single-cell data from phenotypic information in 
+    bulk data. You can use known feature vectors of phenotypic information or create feature vectors via the function 
+    in the PIPET. This package also provides commonly used downstream analysis for creating customizable visualization 
+    results.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+biocViews: 
+Imports: 
+    cowplot,
+    DESeq2,
+    ggplot2,
+    Matrix,
+    matrixStats,
+    parallel,
+    Seurat,
+    stats,
+    survival,
+    survminer,
+    tibble
+Depends: 
+    R (>= 4.3.1),
+    tidyverse
+URL:
+LazyData: true
