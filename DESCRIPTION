@@ -30,7 +30,8 @@ Imports:
 Depends: 
     R (>= 4.3.1),
     tidyverse
-URL:
+URL: https://github.com/ruan2ruan/PIPET
+BugReports: https://github.com/ruan2ruan/PIPET/issues
 LazyData: true
 Suggests: 
     knitr,
