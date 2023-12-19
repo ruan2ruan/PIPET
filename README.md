@@ -24,7 +24,7 @@ devtools::install_github("ruan2ruan/PIPET")
 
 In the R terminal, please use the command `?PIPET` to access the help documents.
 
-To view the detailed guide of how to use PIPET, please find package guidance in [vignette](https://ruan2ruan.github.io/PIPET/PIPET.html), or run the following lines in R:
+To view the detailed guide of how to use PIPET, please find package guidance in [vignette](https://github.com/ruan2ruan/PIPET/blob/main/vignettes/PIPET.html), or run the following lines in R:
 
 ```{r}
 library(PIPET)
