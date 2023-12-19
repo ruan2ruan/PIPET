@@ -1,0 +1,360 @@
+---
+title: "PIPET: <br>Phenotypic Information Based on Bulk Data Predicts Relevant Subpopulations in Single Cell Data"
+author: "XINJIA RUAN"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+    highlight: github    
+    toc: true
+    fig_width: 15
+    fig_height: 6
+    df_print: paged
+    css: "customer.css"
+vignette: >
+  %\VignetteIndexEntry{PIPET}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{css my-header-colors, echo = FALSE}
+.entry-image {
+  min-height: 300px;
+  background-image: linear-gradient(-90deg, #52ADAA, #A752AD);
+}
+
+
+body{
+    background:white;
+    color:#404040;
+#    font-family:"Times New Roman";  
+    font-weight:600;              
+    min-height:100%;
+}
+
+.toc {
+  width: 100%;                    
+  margin: 0 auto;
+  font-weight:600; 
+  font-size: 1.3em;
+  padding: 15px;
+  border: solid 1px transparent;    
+}
+
+
+h1,h2,h3,h4,h5,h6,legend{
+#    font-family:"Times New Roman";     
+    font-weight:650;
+    color: #3f37c9;                    
+}
+
+.entry-header {
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+  .entry-content {
+    max-width: 1600px;            
+    margin: 0px auto 0px auto;   
+    padding: 150px 150px;               
+  }
+
+pre {
+  padding: 1em;
+  margin-bottom: 1.5em;
+  line-height: 1.5;
+  color: #d0d0d0;
+  color: #525252;
+  border: 1px solid #dbdbdb;
+  background-color: #272822;
+  background-color: rgba(120, 135, 171, 0.3);     
+  border-radius: 3px;
+  position: relative;
+  margin: 1em 0;
+}
+
+.pagedtable-wrapper {
+    border: 0px solid #ccc;             
+    border-radius: 4px;
+    margin-bottom: 10px;
+}
+
+th {
+  background-color: #7887AB;
+  color: white;
+}
+
+tr:nth-child(even) {
+  background-color: #3f37c9;
+}
+
+tr:nth-child(odd) {
+  background-color: rgba(120, 135, 171, 0.3);
+}
+
+section level3::-moz-selection {
+  background-color: #3f37c9;
+  color: #3f37c9;
+  text-shadow: none;
+}
+
+```
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r, echo=FALSE}
+Sys.setenv(LANGUAGE = "en")
+```
+
+# Introduction
+
+`PIPET` can be used to predict relevant subpopulations in single-cell data from phenotypic information in bulk data. You can use known feature vectors of phenotypic information to preform PIPET() or create feature vectors via the function in the `PIPET`. This package also provides commonly used downstream analysis for creating customizable visualization results. The workflow of `PIPET` is shown in the following Figure:
+
+<p align="center">
+<img src=Figure_PIPET.jpg height="900" width="640">
+</p>
+
+# Installation
+
+To install this package, start R (version >= 4.3.1) and enter:
+
+```{r, warning=FALSE, message=FALSE, echo=TRUE, eval=FALSE}
+if (!require("devtools")) 
+    install.packages("devtools")
+devtools::install_github("ruan2ruan/PIPET")
+```
+
+If errors occur during installation, we recommend that you first try to install all R dependencies by referring to the `Imports` in the [DESCRIPTION](https://github.com/ruan2ruan/PIPET/blob/main/DESCRIPTION) file, and then install PIPET.
+
+After installation, you could load the PIPET package in your R session:
+
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+library(PIPET)
+```
+
+In this tutorial, our single cell dataset is derived from the Peripheral Blood Mononuclear Cells (PBMC) freely available from 10X Genomics. Data has been preprocessed and annotated of cell types can be downloaded from [SeuratData](https://github.com/satijalab/seurat-data)<sup>1</sup>. Therefore, before loading Seurat<sup>2</sup> object data, we also need to load some related packages (for specific installation methods, please refer to the website of the relevant packages):
+
+```{r, eval=TRUE, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(patchwork)
+library(Seurat)
+library(SeuratData)
+```
+
+# PIPET example
+
+Here, we demonstrate key steps for PIPET prediction of relevant subpopulations in single-cell data and provide some downstream visualization results. The inputs of PIPET require a single-cell expression matrix and a set of feature vectors containing phenotypic information. This package contains a 571-gene panel for classification of AML and preprocessed TPM expression data and survival data of TCGA-LAML, and now we will show how to perform PIPET in a practical application.
+
+## Import data
+
+We load in the 3k PBMC single cell data, which has been preprocessed and annotated of cell types. It has 13714 features and 2638 samples.
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.width =8, fig.height =6}
+#InstallData("pbmc3k")
+pbmc3k.final <- LoadData("pbmc3k", type = "pbmc3k.final")
+SC = UpdateSeuratObject(object = pbmc3k.final)
+SC
+```
+
+Then we loaded the signature data for AML classification (571 genes identified three main clusters c1, c2, c3). Mo et al.<sup>3</sup> generated these signature genes and demonstrated their good performance in classifying clinically relevant subtypes of AML.
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.width =8, fig.height =6}
+markers <- read.table("../data/AML_Subtypes_signature.txt",sep = "\t",check.names = F,stringsAsFactors = F,header = T,row.names = NULL)
+table(markers$class)
+head(markers,5)
+```
+
+## Using PIPET to identify cell subpopulations
+
+Based on the above input data, we can use PIPET to identify the phenotype-associated cell subpopulations. The calculation may take several minutes, depending on the amount of data you have and the number of cores you set.
+
+```{r warning=FALSE, echo=TRUE, fig.width =8, fig.height =6}
+set.seed(123)
+tmp <- PIPET(SC_data=SC, markers=markers, gene_col= "genes", class_col= "class",
+             nCores=4)
+```
+
+We merged the PIPET-predicted cell subpopulation results with the original single-cell data.
+
+```{r warning=FALSE, echo=TRUE, fig.width =8, fig.height =6}
+tmp$ID <- rownames(tmp)
+metadata <- SC@meta.data
+metadata$ID <- rownames(metadata)
+meta <- merge(metadata,tmp,by="ID")
+rownames(meta) <- meta$ID
+SC <- AddMetaData(SC, metadata = meta)
+```
+
+After filtering out significantly related cell subpopulations (P value less than 0.05), PIPET identified 66 PIPET_c1 cells related to AML-c1 Subtype, 517 PIPET_c2 cells related to AML-c2 Subtype, and 34 PIPET_c3 cells related to AML-c3 Subtype.
+
+```{r warning=FALSE, echo=TRUE, fig.width =8, fig.height =6}
+SC1 <- subset(x = SC, subset= (Pvalue < 0.05))
+table(SC1$prediction)
+```
+
+## Visualize all cells using UMAP
+
+We first visualized all cells included in the analysis using the UMAP plot. And different cell types are distinguished by colors.
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.height=5.5, fig.width=7,fig.align="center"}
+DimPlot(SC, reduction = "umap", group.by = 'seurat_annotations', label = F) +
+  ggtitle("pbmc3k-Celltypes")
+```
+
+## Visualize predicted cells using UMAP
+
+We then plot only the PIPET annotated cells.
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.height=5.5, fig.width=7,fig.align="center"}
+metadata <- SC@meta.data
+temp <- data.frame(ID=SC1$ID,type=SC1$prediction)
+meta <- merge(metadata,temp,by="ID",all = TRUE)
+meta$type <- as.character(meta$type)
+meta$type  <- ifelse(is.na(meta$type), "Undefined", meta$type)
+rownames(meta) <- meta$ID
+meta <- meta[SC$ID,]
+SC <- AddMetaData(SC, metadata = meta)
+
+library(RColorBrewer)
+colors<-brewer.pal(n = 8, name = "Set1")
+
+PIPET_DotPlot(SC,colors,group="type",title="AML-Subtypes")
+```
+
+For a more intuitive comparison, we plot the two results at the same time.
+
+```{r warning=FALSE, echo=TRUE, eval = TRUE, results="asis", message=FALSE}
+p1 <- DimPlot(SC, reduction = "umap", group.by = 'seurat_annotations', label = F) +
+  ggtitle("pbmc3k-Celltypes")
+p2 <- PIPET_DotPlot(SC,colors,group="type",title="AML-Subtypes")
+```
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.height=5, fig.width=12}
+p1 | p2
+```
+
+## Proportion plots
+
+We could see that the cells in each PIPET subpopulation are derived from different cell types. PIPET_BarPlot() can display the main cell compositions of each cell subpopulation through stacked histograms.
+
+```{r warning=FALSE, echo=TRUE, fig.width =8, fig.height =6,fig.align="center"}
+table(SC1$seurat_annotations,SC1$prediction)
+```
+
+```{r warning=FALSE, echo=TRUE, fig.width =6, fig.height =8,fig.align="center"}
+PIPET_BarPlot(SC1,group="seurat_annotations",prediction="prediction",ylim=530)
+```
+
+## DE genes
+
+We then found differentially expressed features of PIPET_c1, PIPET_c2 and PIPET_c3. And top markers were selected to visualize expression.
+
+```{r warning=FALSE, echo=TRUE, fig.width =8, fig.height =6,fig.align="center"}
+DefaultAssay(SC1) <- "RNA"
+Idents(SC1)="prediction"
+
+#find markers for every cluster compared to all remaining cells, report only the positive ones
+SC.markers <- FindAllMarkers(SC1, only.pos = TRUE,
+                             min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+```{r warning=FALSE, echo=TRUE, fig.width =8, fig.height =6,fig.align="center"}
+biomarkers <- SC.markers %>%
+  dplyr::filter(p_val_adj<0.05) %>%
+  group_by(cluster) %>%
+  slice_max(n = 20000, order_by = avg_log2FC)
+top <- biomarkers %>%
+  group_by(cluster) %>%
+  slice_head(n = 4)
+top
+```
+
+## Multi-Violin Plot
+
+We used PIPET_MultiViolin() to create a stacked violin plot, which could display violin plots of multiple cell populations or cell types in the same figure to compare gene expression changes between them.
+
+```{r warning=FALSE, echo=TRUE, fig.width =9, fig.height =5,fig.align="center"}
+features <- top$gene
+PIPET_MultiViolin(SC1, features, preprocess=FALSE)
+```
+
+## Prepare Data
+
+We load the preprocessed TCGA-LAML bulk expression matrix and the corresponding clinical survival data. The FPKM data of TCGA-LAML and the corresponding clinical data were downloaded from the Xena public platform (https://xena.ucsc.edu/public-hubs). We converted FPKM expression data to TPM and matched samples with expression data and clinical data.
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.width =8, fig.height =6,fig.align="center"}
+data("TCGA_LAML_TPM")
+TPM <- TCGA_LAML_TPM
+data("TCGA_LAML_Surv")
+surv.info <- TCGA_LAML_Surv
+```
+
+In this TPM expression matrix, each row represents a gene and each column represents a sample. A total of 49038 genes and 130 samples were included in subsequent analyses.
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.width =8, fig.height =6,fig.align="center"}
+dim(TPM)
+```
+
+We only selected the clinical data of survival information, including sample ID, outcome event (1 means dead, 0 means alive) and survival time (in days).
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.width =8, fig.height =6,fig.align="center"}
+head(surv.info,3)
+```
+
+## A multivariate Cox regression analysis
+
+A multivariate Cox regression model was established using the selected genes that were significantly differentially expressed in PIPET_c3 (c3 subtype is the subtype with the worst prognosis).
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.width =8, fig.height =6,fig.align="center"}
+c3 <- biomarkers %>%
+  filter(cluster=="c3") %>%
+  filter(avg_log2FC>=2)
+
+TPM.norm <- log2(TPM + 1)
+TPM.norm <- data.frame(t(na.omit(TPM.norm[c3$gene,])))
+genes <- colnames(TPM.norm)
+
+tmp <-TPM.norm[rownames(surv.info),]
+survival_info_df <- cbind(tmp,surv.info)
+
+library(survival)
+multi_COX<-coxph(Surv(futime, fustat) ~ ., data=survival_info_df)
+```
+
+## Plot Kaplan–Meier curve
+
+PIPET_KM() calculated the risk score of each sample based on the coefficients obtained from the multivariate Cox regression model. And then we divided the samples into high/low risk groups according to the median value of the risk score. Finally, the KM survival curve is drawn based on the risk group. As shown in the figure below, patients in the high-risk group have worse prognosis than patients in the low-risk group.
+
+```{r warning=FALSE, echo=TRUE, message=FALSE, fig.width =6, fig.height =7,fig.align="center"}
+PIPET_KM(data=survival_info_df, genes=genes,coxph=multi_COX, surv_cols=c("fustat","futime"),
+         xlim=100,legend.title="TCGA-LAML", legend.labs = c("HRisk", "LRisk"),
+         pval = TRUE, conf.int = TRUE,  palette = "simpsons")
+```
+
+# Summary
+
+Above, we introduced the main functions included in the PIPET package. It can help you integrate information from bulk data and single-cell data, and perform multi-omics analysis. The package PIPET can not only be used to predict relevant cell subpopulations in single cells, but also provides several visualization functions for enriching downstream analyses. If you have any questions about PIPET or suggestions for improving the package, please posted them to the Issue section of GitHub at https://github.com/ruan2ruan/PIPET/issues, or email them to ruan.cpu@foxmail.com. Any useful suggestions will help us further improve PIPET and provide more functions.
+
+# Session Information
+
+```{r, echo=TRUE, eval=TRUE}
+sessionInfo()
+```
+
+```{r, echo=FALSE, eval=FALSE}
+save.image("PIPET_AML.RData")
+```
+
+# References
+
+1. Stoeckius, M., Hafemeister, C., Stephenson, W. et al. Simultaneous epitope and transcriptome measurement in single cells. Nat Methods. 14, 865–868 (2017).
+
+2. Hao, Y., Hao, S., Andersen-Nissen, E. et al. Integrated analysis of multimodal single-cell data. Cell. 13, 3573-3587 (2021).
+
+3. Mo, Q., Yun, S., Sallman, D.A. et al. Integrative molecular subtypes of acute myeloid leukemia. Blood Cancer J. 13, 71 (2023).
