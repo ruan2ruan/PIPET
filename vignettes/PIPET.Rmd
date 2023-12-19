@@ -57,7 +57,7 @@ h1,h2,h3,h4,h5,h6,legend{
   .entry-content {
     max-width: 1600px;            
     margin: 0px auto 0px auto;   
-    padding: 150px 150px;               
+    padding: 30px 150px;               
   }
 
 pre {
