@@ -1,0 +1,515 @@
+---
+title: "LUAD-TP53"
+output: 
+  html_document: 
+    toc: true
+    toc_float:
+      collapsed: false
+    fig_width: 15
+    fig_height: 6
+---
+
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+## Load package
+library(magrittr)
+library(Signac)
+library(Seurat)
+library(GenomeInfoDb)
+library(ggplot2)
+library(patchwork)
+library(tidyverse)
+library(Matrix)
+library(harmony)
+library(openxlsx)
+library(forestplot)
+```
+
+### Import data
+
+```{r warning=FALSE, echo=FALSE, message=FALSE, fig.width =8, fig.height =6}
+load("SC_nLung_tLung.RData")
+
+TPM <- read.table("TCGA_LUAD_mRNA_TPM.txt", sep = "\t",check.names = F, header = T,stringsAsFactors = F,row.names = 1)
+Count <- read.table("TCGA_LUAD_Count.txt", sep = "\t",check.names = F, header = T,stringsAsFactors = F,row.names = 1)
+surv <- read.table("TCGA_LUAD_surv.txt",sep = "\t",row.names = 1,header = T,check.names = F,stringsAsFactors = F)
+```
+
+### DESeq2 for bulk markers
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+surv$TP53 <- factor(surv$TP53,levels = c("Wild","Mutated"))
+surv$Sample <- rownames(surv)
+colData <- surv[,c(7,8)]
+count <- Count[rownames(TPM),colnames(TPM)]
+
+library("DESeq2")
+dds <- DESeqDataSetFromMatrix(countData=count, colData=colData, design= ~ TP53)
+dds <- DESeq(dds)
+res <- as.data.frame(results(dds))
+
+UP <- res %>%
+  filter(padj<0.05) %>%
+  filter(log2FoldChange>=1) 
+UP <- UP %>% mutate(class="Mutated",genes=rownames(UP))%>%
+  select(genes,class)
+DOWN <- res %>%
+  filter(padj<0.05) %>%
+  filter(log2FoldChange<=-1) 
+DOWN <- DOWN %>% mutate(class="Wild",genes=rownames(DOWN)) %>%
+  select(genes,class)
+markers <- rbind(DOWN,UP)
+```
+
+### PIPET
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+SC <- subset(SC_Lung, subset = Sample_Origin %in% c("tLung"))
+```
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+t1=proc.time()
+tmp <- PIPET(SC_data=SC, markers=markers, gene_col= "genes", class_col= "class")
+t2=proc.time()
+t2-t1
+```
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+tmp$ID <- rownames(tmp)
+metadata <- SC_Lung@meta.data
+meta <- merge(metadata,tmp,by="ID")
+rownames(meta) <- meta$ID
+SC_Lung <- AddMetaData(SC_Lung, metadata = meta)
+save(SC_Lung, file="SC_Lung_TP53_prediction.RData")
+```
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+SC1 <- subset(x = SC_Lung, subset= (FDR < 0.05))
+table(SC1$prediction)
+table(SC1$Cell_type,SC1$prediction)
+# table(SC1$Cell_subtype,SC1$prediction)
+```
+
+### Proportion plots
+
+```{r warning=FALSE, echo=FALSE, fig.width =5, fig.height =8}
+tmp <- as.data.frame(table(SC1$Cell_type,SC1$prediction))
+tmp <- tmp %>%
+  filter(Var2=="Mutated") %>%
+  mutate(prop = round(Freq/sum(Freq)*100, digits = 1))
+tmp$Var1 <- factor(tmp$Var1, levels = c("MAST cells", "Fibroblasts","Myeloid cells", "Epithelial cells",
+                                        "NK cells","T lymphocytes","B lymphocytes","Endothelial cells")) 
+
+p <- ggplot(tmp, aes(x = reorder(Var1, - Freq), y = Freq, fill = Var1)) +
+  geom_bar(stat ="identity",width = 0.6,position = position_dodge(width=0.8))+        
+#    scale_fill_manual(values = c("#E7B800","#8ac926"))+
+    labs(x = "",y = "Number of cells")+
+    ###########文字的position设置类似bar的position
+    geom_text(aes(label = tmp$Freq),position=position_dodge(width = 0.8),size =4 ,vjust = -0.45)+  
+#    guides(fill = guide_legend(reverse = F))+
+    theme_classic()+
+    scale_y_continuous(expand=c(0,0))+
+    coord_cartesian(ylim = c(0, 2000)) +
+    theme(axis.text.x = element_text(size = 13, color = "black",angle = 90,hjust = 1,vjust = 0.3),
+          axis.text.y = element_text(size = 12, color = "black"),
+          axis.title.x = element_text(size = 16), 
+          axis.title.y = element_text(size = 16),
+          legend.text = element_text(size = 12), 
+          legend.position="none")
+p 
+
+pdf("./Results/TP53_LUAD_Mutated_Cells_in_Celltypes.pdf",width=6,height=7)
+p
+dev.off()
+```
+
+### Pie plots
+
+#### Mutated
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+tmp <- subset(SC1, subset = prediction %in% c("Mutated"))
+tmp1 <- subset(tmp, subset = Cell_type %in% c("T lymphocytes"))
+tmp2 <- subset(tmp, subset = Cell_type %in% c("Myeloid cells"))
+tmp3 <- subset(tmp, subset = Cell_type %in% c("B lymphocytes"))
+tmp4 <- subset(tmp, subset = Cell_type %in% c("Epithelial cells"))
+
+table(tmp1$Cell_subtype,tmp1$prediction)
+table(tmp2$Cell_subtype,tmp2$prediction)
+table(tmp3$Cell_subtype,tmp3$prediction)
+table(tmp4$Cell_subtype,tmp4$prediction)
+```
+
+```{r warning=FALSE, echo=FALSE, fig.width =7.5, fig.height =6}
+x <- tmp1$Cell_subtype
+tmp <- data.frame(table(x))
+tmp$percent<- paste(round(100*tmp$Freq/sum(tmp$Freq), 2), "%")
+tmp <- tmp[order(tmp$Freq,decreasing = TRUE),]
+tmp$celltype <- factor(tmp$x,levels=tmp$x)
+
+library(RColorBrewer)
+colors<-brewer.pal(12,'Paired')
+# colors<-c("#3f60aa","#44c1f0","#13a983","#9ec417",
+#           "#e4ce00","#f18800","#e8490f","#cc340c")
+
+library(ggforce)
+p1 <- ggplot()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank(), 
+        axis.text.y = element_blank(),
+        axis.text.x = element_blank(),
+        legend.title=element_blank(), 
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        plot.title = element_text(size=18,hjust = 0.5,face="bold"))+
+  xlab("")+ylab('')+ ggtitle("Epithelial cells") +
+  scale_fill_manual(values = colors)+
+  geom_arc_bar(data=tmp,
+               stat = "pie",
+               aes(x0=0,y0=0,r0=1,r=2,
+                   amount=Freq,fill=celltype)
+  )+
+  annotate("text",x=1.5,y=1.5,label="22.71%",angle=-45,size=5)+
+  annotate("text",x=1.9,y=-0.9,label="18.43%",angle=65,size=5)+
+  annotate("text",x=0.15,y=-2.1,label="15.36%",angle=5,size=5)+
+  annotate("text",x=-1.7,y=-1.25,label="13.64%",angle=-55,size=5)+
+  annotate("text",x=-2.15,y=0,label="9.79%",angle=90,size=5)+
+  annotate("text",x=-1.8,y=1.15,label="7.64%",angle=65,size=5)
+p1
+```
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+x <- tmp2$Cell_subtype
+tmp <- data.frame(table(x))
+tmp$percent<- paste(round(100*tmp$Freq/sum(tmp$Freq), 2), "%")
+tmp <- tmp[order(tmp$Freq,decreasing = TRUE),]
+tmp$celltype <- factor(tmp$x,levels=tmp$x)
+
+colors<-brewer.pal(12,'Paired')
+# colors<-c("#3f60aa","#44c1f0","#13a983","#9ec417",
+#           "#e4ce00","#f18800","#e8490f","#cc340c")
+
+p2 <- ggplot()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank(), 
+        axis.text.y = element_blank(),
+        axis.text.x = element_blank(),
+        legend.title=element_blank(), 
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        plot.title = element_text(size=18,hjust = 0.5,face="bold"))+
+  xlab("")+ylab('')+ ggtitle("Fibroblasts") +
+  scale_fill_manual(values = colors)+
+  geom_arc_bar(data=tmp,
+               stat = "pie",
+               aes(x0=0,y0=0,r0=1,r=2,
+                   amount=Freq,fill=celltype)
+  )+
+  annotate("text",x=2.0,y=-0.7,label="53.52%",angle=70,size=5)+
+  annotate("text",x=-1.45,y=-1.6,label="15.09%",angle=-45,size=5)+
+  annotate("text",x=-2.12,y=-0.2,label="9.43%",angle=100,size=5)
+p2
+```
+
+```{r warning=FALSE, echo=FALSE, fig.width =7.5, fig.height =6}
+x <- tmp3$Cell_subtype
+tmp <- data.frame(table(x))
+tmp$percent<- paste(round(100*tmp$Freq/sum(tmp$Freq), 2), "%")
+tmp <- tmp[order(tmp$Freq,decreasing = TRUE),]
+tmp$celltype <- factor(tmp$x,levels=tmp$x)
+
+colors<-brewer.pal(8,'Paired')
+# colors<-c("#3f60aa","#44c1f0","#13a983","#9ec417",
+#           "#e4ce00","#f18800","#e8490f","#cc340c")
+
+p3 <- ggplot()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank(), 
+        axis.text.y = element_blank(),
+        axis.text.x = element_blank(),
+        legend.title=element_blank(), 
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        plot.title = element_text(size=18,hjust = 0.5,face="bold"))+
+  xlab("")+ylab('')+ ggtitle("Endothelial cells") +
+  scale_fill_manual(values = colors)+
+  geom_arc_bar(data=tmp,
+               stat = "pie",
+               aes(x0=0,y0=0,r0=1,r=2,
+                   amount=Freq,fill=celltype)
+  ) +
+  annotate("text",x=1.5,y=-1.5,label="74.61%",angle=50,size=5)+
+  annotate("text",x=-1.9,y=1.0,label="15.17%",angle=62,size=5)+
+  annotate("text",x=-0.8,y=1.95,label="7.12%",angle=20,size=5)
+p3
+```
+
+```{r warning=FALSE, echo=FALSE, fig.width =11, fig.height = 8}
+library(ggpubr)
+ggarrange(p1,p2,p3, ncol = 2,nrow =2)
+
+pdf("./Results/Mutated_LUAD_Pie_plot.pdf",width=11,height=8)
+ggarrange(p1,p2,p3, ncol = 2,nrow =2)
+dev.off()
+```
+
+#### Wild
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+tmp <- subset(SC1, subset = prediction %in% c("Wild"))
+tmp1 <- subset(tmp, subset = Cell_type %in% c("Epithelial cells"))
+
+table(tmp1$Cell_subtype,tmp1$prediction)
+```
+
+### DE genes
+
+```{r warning=FALSE, echo=FALSE, fig.width =8, fig.height =6}
+DefaultAssay(SC1) <- "RNA"
+Idents(SC1)="prediction"
+
+#find markers for every cluster compared to all remaining cells, report only the positive ones
+SC.markers <- FindAllMarkers(SC1, only.pos = TRUE, 
+                             min.pct = 0.25, logfc.threshold = 0.25)
+
+biomarkers <- SC.markers %>%
+  dplyr::filter(p_val_adj<0.05) %>%
+  group_by(cluster) %>%
+  slice_max(n = 20000, order_by = avg_log2FC)
+
+Mutated <- biomarkers %>% dplyr::filter(cluster=="Mutated") %>%
+  dplyr::filter(avg_log2FC>=2)
+
+tmp <- biomarkers %>% dplyr::filter(cluster %in% c("Mutated","Wild")) %>%
+  dplyr::filter(avg_log2FC>=2)
+```
+
+### Violin Plot
+
+```{r warning=FALSE, echo=FALSE, fig.width =12, fig.height =8}
+# Subset data.frame
+## Normalizing
+SC1 <- NormalizeData(SC1, normalization.method = "LogNormalize", scale.factor = 1e4)
+## Find highly variable features
+SC1 <- FindVariableFeatures(SC1, selection.method = "vst", nfeatures = 2000)
+## Scaling the data
+SC1 <- ScaleData(SC1, features = rownames(SC1))
+
+library(ggsignif)
+
+p1 <- VlnPlot(SC1,features = "APOE",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p2 <- VlnPlot(SC1,features = "SRGN",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p3 <- VlnPlot(SC1,features = "LGALS1",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p4 <- VlnPlot(SC1,features = "CXCR4",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p5 <- VlnPlot(SC1,features = "S100A4",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p6 <- VlnPlot(SC1 ,features = "STMN1",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+
+library(ggpubr)
+ggarrange(p1,p2,p3,p4,p5,p6,ncol = 3,nrow =2)
+
+pdf("./Results/Mutated_LUAD_genes_Violin_plot.pdf",width=12,height=8)
+ggarrange(p1,p2,p3,p4,p5,p6,ncol = 3,nrow =2)
+dev.off()
+```
+
+```{r warning=FALSE, echo=FALSE, fig.width =12, fig.height =8}
+p1 <- VlnPlot(SC1,features = "VIM",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p2 <- VlnPlot(subset(SC1,CCL18>0),features = "CCL18",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p3 <- VlnPlot(SC1,features = "CCL5",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p4 <- VlnPlot(SC1,features = "RGS1",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p5 <- VlnPlot(SC1,features = "TYROBP",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+p6 <- VlnPlot(SC1 ,features = "C1QB",adjust = .8,
+        cols = c("#E7B800","#8ac926"), group.by ="prediction",pt.size = 0)+
+  xlab("") + stat_compare_means()
+
+library(ggpubr)
+ggarrange(p1,p2,p3,p4,p5,p6,ncol = 3,nrow =2)
+
+pdf("./Results/Mutated_LUAD_genes_Violin_plot2.pdf",width=12,height=8)
+ggarrange(p1,p2,p3,p4,p5,p6,ncol = 3,nrow =2)
+dev.off()
+```
+
+### Multi-Violin Plot
+
+```{r warning=FALSE, echo=FALSE, fig.width =9, fig.height =6}
+library(cowplot)
+
+features <- c("VIM","CCL18","CCL5","RGS1","TYROBP","C1QB")
+#features <- Mutated$gene
+data <- data.frame(t(data.frame(SC1@assays$RNA@data[features,])))
+
+# Add cell ID and identity classes
+data$Cell <- colnames(SC1)
+data$Celltype <- SC1$Cell_subtype
+data0 <- data %>%
+  filter(Celltype %in% c("CD4+ Th","Naive CD4+ T","CD8+/CD4+ Mixed Th",
+                         "Exhausted CD8+ T","Treg","mo-Mac",
+                         "CD163+CD14+ DCs","Alveolar Mac","Follicular B cells"))
+data0$Celltype <- factor(data0$Celltype, levels = c("CD4+ Th","Naive CD4+ T","CD8+/CD4+ Mixed Th",
+                         "Exhausted CD8+ T","Treg","mo-Mac",
+                         "CD163+CD14+ DCs","Alveolar Mac","Follicular B cells"))
+
+# Use melt to change data.frame format
+data1 <- reshape2::melt(data0, id.vars = c("Cell","Celltype"), measure.vars = features,
+                       variable.name = "Feat", value.name = "Expr")
+head(data1)
+
+p_1 <- ggplot(data1, aes(Expr, Celltype, fill = Celltype)) +
+        geom_violin(scale = "width", adjust = 1, trim = TRUE) +
+        scale_x_continuous(expand = c(0, 0), labels = function(x)
+                           c(rep(x = "", times = length(x)-2), x[length(x) - 1], "")) +
+        facet_grid(cols = vars(Feat), scales = "free")  +
+        theme_cowplot(font_size = 12) +
+        theme(legend.position = "none", 
+ #             panel.spacing = unit(0, "lines"),
+          plot.title = element_text(hjust = 0.5),
+ #             panel.background = element_rect(fill = NA, color = "black"),
+              strip.background = element_blank(),
+              strip.text = element_text(face = "bold"),
+              strip.text.x.top = element_text(angle = 90, hjust = 0, vjust = 0.5)) +
+        xlab("Gene Expression") + ylab("")
+p_1
+
+# pdf("./Results/Downstream_Multi_Violin.pdf",width=8,height=6)
+# p_1
+# dev.off()
+```
+
+### GSEA by using HALLMARK genesets
+
+```{r warning=FALSE, echo=FALSE, message=FALSE, fig.height = 6, fig.width = 9}
+library(clusterProfiler)
+library(enrichplot)
+
+MSigDB=read.gmt("h.all.v2023.1.Hs.symbols.gmt")
+MSigDB$term <- str_replace(MSigDB$term, "HALLMARK_","")
+MSigDB$term <- str_replace_all(MSigDB$term, "_"," ")
+
+data <- biomarkers
+data$log2fc <- ifelse(data$cluster %in% c("Wild"),-data$avg_log2FC,data$avg_log2FC)
+geneList <- data$log2fc
+names(geneList) <- data$gene
+geneList <- sort(geneList,decreasing = T)
+GSEA.data <- GSEA(geneList = geneList,TERM2GENE=MSigDB,seed = T,verbose=F,pvalueCutoff = 0.25)
+
+tmp <- GSEA.data@result %>% 
+  arrange(desc(NES)) %>% 
+#  filter(p.adjust < 0.05) %>% 
+  head(n= 25)
+tmp$color <- ifelse(tmp$NES>0,"Mutated","Wild")
+
+p <- ggplot(tmp, aes(reorder(ID, NES), NES,fill= color)) +
+  geom_bar(stat ="identity",width = 0.8,position = position_dodge(width=0.8))+ 
+#  scale_fill_gradient(low = "#156077", high = "#f46f20")+
+  scale_fill_brewer(palette = 'Set1')+
+  coord_flip() +
+  labs(x="")+
+  theme_bw()+
+  # theme_classic()+
+    theme(#panel.grid.major.x = element_line(color = "grey"), 
+          panel.grid = element_blank(),
+          axis.text.x = element_text(size = 13, color = "black"),
+          axis.text.y = element_text(size = 12, color = "black"),
+          axis.title.x = element_text(size = 16), 
+          axis.title.y = element_text(size = 16),
+          legend.text = element_text(size = 12), 
+          legend.title = element_blank())
+p
+
+pdf(file.path("./Results/GSEA enrichplot(Mutated).pdf"),width = 9,height = 6)
+p
+dev.off()
+```
+
+### Cox
+
+```{r warning=FALSE, echo=FALSE, message=FALSE, fig.width =5, fig.height =6}
+library('survival')
+library('survminer')
+
+TPM.norm <- log2(TPM + 1)
+TPM.norm <- data.frame(t(na.omit(TPM.norm[Mutated$gene,])))
+
+survival_info_df <- surv[,c(1,2)]
+tmp <-TPM.norm[rownames(survival_info_df),]
+survival_info_df <- cbind(tmp,survival_info_df)
+
+multi_COX<-coxph(Surv(futime, fustat) ~ ., data=survival_info_df)
+multi_COX
+
+genes <- Mutated$gene
+
+TPM_RiskScore <- TPM.norm[,genes]
+TPM_RiskScore<-TPM_RiskScore %>%
+  mutate(RiskScore=0.166800*APOE+0.403819*SRGN+0.315130*LGALS1+0.172840*VIM+
+           (-0.126292)*CCL18+(-0.282645)*CXCR4+0.369851*C1QB+(-0.100414)*CCL5+
+           0.008032*S100A4+0.107137*CD52+(-0.008820)*STMN1+(-0.015914)*RGS1+(-0.873861)*TYROBP) %>%
+  mutate(risk_group=ifelse(RiskScore>=median(RiskScore),'HRisk','LRisk'))
+
+surv <- surv[rownames(TPM_RiskScore),]
+survival_risk <- cbind(TPM_RiskScore[,c("RiskScore","risk_group")],surv)
+
+fit<- survfit(Surv(round(futime/30.5,4), fustat) ~ risk_group, data = survival_risk,type = "kaplan-meier", error = "greenwood", conf.type = "plain", na.action = na.exclude)
+
+# names(fit$strata) <- gsub("Subtype=", "", names(fit$strata))
+ggsurv <- ggsurvplot(fit, data = survival_risk,
+           surv.median.line = "h", # Add medians survival
+           xlim = c(0, 120),
+           break.time.by = 30,
+           font.tickslab = c(12),
+           font.x = c(14),
+           font.y = c(14),
+
+           # Change legends: title & labels
+           legend.title = "TCGA-LUAD",
+           legend.labs = c("HRisk", "LRisk"),
+           font.legend = c(12), 
+           # Add p-value and tervals
+           pval = TRUE,
+           conf.int = FALSE,
+           # Add risk table
+           risk.table = TRUE,
+           tables.height = 0.2,
+           risk.table.col = "strata",
+           risk.table.y.text = FALSE,
+
+           # tables.theme = theme_cleantable(),
+           # Color palettes. Use custom color: c("#E7B800", "#2E9FDF"),
+           # or brewer color (e.g.: "Dark2"), or ggsci color (e.g.: "jco")
+           palette = "simpsons",
+           ggtheme = theme_classic() # Change ggplot2 theme
+)
+ggsurv$table <- ggsurv$table + labs(y = NULL) +
+  theme(axis.text.x = element_text(size = 12),
+        axis.title.x = element_text(size = 14))
+ggsurv
+
+pdf("./Results/Mutated_TCGA_LUAD_KM_plot.pdf",width=5,height=6)
+ggsurv
+dev.off()
+```
